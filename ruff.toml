@@ -1,0 +1,9 @@
+line-length = 130
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["B008", "B904", "UP042"]  # Depends() defaults; HTTPException re-raise; (str, Enum) kept for JSON-friendly str()
+
+[lint.isort]
+known-first-party = ["app"]

@@ -1,0 +1,52 @@
+groups:
+  - name: mlops-jobs
+    rules:
+      - alert: TrainingRunStalled
+        expr: increase(mlops_stall_detections_total[10m]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "A training run stopped heartbeating and was killed by the watchdog"
+          description: "{{ $value | humanize }} run(s) stalled in the last 10 minutes. Check the run timeline and pod logs."
+
+      - alert: HeartbeatLagging
+        expr: max(mlops_oldest_heartbeat_age_seconds) > 45
+        for: 1m
+        labels: { severity: info }
+        annotations:
+          summary: "A running job has not heartbeated for {{ $value | humanizeDuration }} (stall threshold is close)"
+
+      - alert: TrainingFailureSpike
+        expr: sum(increase(mlops_runs_finished_total{status="failed"}[15m])) > 3
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $value | humanize }} training runs failed in 15 minutes"
+
+      - alert: HighFailureRatio
+        expr: |
+          sum(increase(mlops_runs_finished_total{status=~"failed|stalled"}[1h]))
+            / clamp_min(sum(increase(mlops_runs_finished_total[1h])), 1) > 0.5
+          and sum(increase(mlops_runs_finished_total[1h])) >= 4
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "More than half of training runs failed or stalled in the last hour"
+
+      - alert: QueueNotDraining
+        expr: max(mlops_queue_depth) > 0 and max(mlops_active_runs) == 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Jobs are queued but nothing is running — dispatcher or executor is broken"
+
+      - alert: DispatcherDown
+        expr: time() - max(mlops_dispatcher_last_tick_timestamp) > 60
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "No dispatcher has run a scheduling loop for over a minute"
+
+      - alert: DispatchErrors
+        expr: increase(mlops_dispatch_errors_total[10m]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "The executor rejected job launches (bad image, RBAC, quota?)"

@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push: { branches: [main] }
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip, cache-dependency-path: backend/requirements*.txt }
+      - run: pip install -r backend/requirements-dev.txt
+      - name: Lint
+        run: ruff check backend trainer
+      - name: Tests (real dispatcher + subprocess trainer)
+        working-directory: backend
+        run: pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: frontend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: npm ci
+      - run: npx vitest run
+      - run: npm run build
+
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Kubernetes manifests
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz
+          ./kubeconform -strict -summary deploy/k8s/0*.yaml
+      - name: Validate Prometheus rules
+        run: docker run --rm -v "$PWD/deploy/prometheus:/p" --entrypoint promtool prom/prometheus:v2.54.1 check rules /p/alerts.yml
+
+  images:
+    needs: [backend, frontend, manifests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - run: docker build -t mlops-backend:${{ github.sha }} -f backend/Dockerfile .
+      - run: docker build -t mlops-trainer:${{ github.sha }} trainer
+      - run: docker build -t mlops-dashboard:${{ github.sha }} frontend
+      - name: Smoke-test images on a kind cluster
+        if: github.event_name == 'push'
+        uses: helm/kind-action@v1
+        with: { cluster_name: mlops, config: deploy/k8s/kind-cluster.yaml }
+      - if: github.event_name == 'push'
+        run: |
+          for i in backend trainer dashboard; do docker tag mlops-$i:${{ github.sha }} mlops-$i:latest; done
+          kind load docker-image mlops-backend:latest mlops-trainer:latest mlops-dashboard:latest --name mlops
+          kubectl apply -f deploy/k8s/00-namespace.yaml
+          kubectl -n mlops create configmap prometheus-alerts --from-file=deploy/prometheus/alerts.yml
+          for c in grafana-datasources grafana-providers grafana-dashboards; do kubectl -n mlops create configmap $c; done
+          kubectl apply -f deploy/k8s/
+          kubectl -n mlops rollout status deploy/mlops-api --timeout=240s
+          kubectl -n mlops rollout status deploy/mlops-dispatcher --timeout=120s

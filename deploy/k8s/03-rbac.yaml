@@ -1,0 +1,21 @@
+# The API and dispatcher create/watch/delete training Jobs and read pod logs — in this namespace only.
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: mlops-controller, namespace: mlops }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: { name: mlops-job-manager, namespace: mlops }
+rules:
+  - apiGroups: [batch]
+    resources: [jobs, jobs/status]
+    verbs: [create, get, list, watch, delete]
+  - apiGroups: [""]
+    resources: [pods, pods/log]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: { name: mlops-job-manager, namespace: mlops }
+subjects: [{ kind: ServiceAccount, name: mlops-controller, namespace: mlops }]
+roleRef: { kind: Role, name: mlops-job-manager, apiGroup: rbac.authorization.k8s.io }

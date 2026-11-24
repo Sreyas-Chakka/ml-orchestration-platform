@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: mlops-api, namespace: mlops }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: mlops-api } }
+  template:
+    metadata:
+      labels: { app: mlops-api }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "8000", prometheus.io/path: /metrics }
+    spec:
+      serviceAccountName: mlops-controller
+      securityContext: { fsGroup: 1000 }
+      containers:
+        - name: api
+          image: mlops-backend:latest
+          imagePullPolicy: IfNotPresent
+          envFrom: [{ configMapRef: { name: mlops-config } }, { secretRef: { name: mlops-secrets } }]
+          env: [{ name: EMBEDDED_WORKER, value: "false" }]
+          ports: [{ containerPort: 8000 }]
+          readinessProbe: { httpGet: { path: /readyz, port: 8000 }, periodSeconds: 5 }
+          livenessProbe: { httpGet: { path: /healthz, port: 8000 }, periodSeconds: 10 }
+          resources: { requests: { cpu: 100m, memory: 192Mi }, limits: { memory: 512Mi } }
+          volumeMounts: [{ name: artifacts, mountPath: /srv/.data/artifacts }]
+      volumes: [{ name: artifacts, persistentVolumeClaim: { claimName: mlops-artifacts } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: mlops-api, namespace: mlops }
+spec: { selector: { app: mlops-api }, ports: [{ port: 8000, targetPort: 8000 }] }
+---
+# Dispatcher. Several replicas are safe: a Redis leader lock lets one schedule at a time.
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: mlops-dispatcher, namespace: mlops }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: mlops-dispatcher } }
+  template:
+    metadata:
+      labels: { app: mlops-dispatcher }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "9100" }
+    spec:
+      serviceAccountName: mlops-controller
+      containers:
+        - name: dispatcher
+          image: mlops-backend:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "app.worker"]
+          envFrom: [{ configMapRef: { name: mlops-config } }, { secretRef: { name: mlops-secrets } }]
+          ports: [{ containerPort: 9100, name: metrics }]
+          resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 384Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: mlops-dispatcher-metrics, namespace: mlops }
+spec: { selector: { app: mlops-dispatcher }, ports: [{ port: 9100 }] }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: mlops-dashboard, namespace: mlops }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: mlops-dashboard } }
+  template:
+    metadata: { labels: { app: mlops-dashboard } }
+    spec:
+      containers:
+        - name: dashboard
+          image: mlops-dashboard:latest
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 80 }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: api, namespace: mlops }   # nginx in the dashboard image proxies /api to http://api:8000
+spec: { selector: { app: mlops-api }, ports: [{ port: 8000, targetPort: 8000 }] }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: mlops-dashboard, namespace: mlops }
+spec: { selector: { app: mlops-dashboard }, ports: [{ port: 80 }] }
