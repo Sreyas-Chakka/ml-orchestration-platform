@@ -111,18 +111,24 @@ def heuristic_report(exp: Experiment, runs: list[Run]) -> dict[str, Any]:
     durations = [r.duration_s for r in runs if r.duration_s and r.status == RunStatus.succeeded]
     facts = [run_facts(r, exp) for r in runs]
     anomalies = [a for r in runs for a in detect(r, exp, durations)]
-    key = f"best_{exp.primary_metric}"
-    scored = [f for f in facts if f[key] is not None and f["status"] == "succeeded"]
+    pm = exp.primary_metric
+    peak_key = f"best_{pm}"
+    # Rank by the final value (what the dashboard and experiment "best" use); report the peak alongside.
+    scored = [f for f in facts if f["final"].get(pm) is not None and f["status"] == "succeeded"]
     best = None
     if scored:
-        best = (max if exp.metric_goal == "max" else min)(scored, key=lambda f: f[key])
+        best = (max if exp.metric_goal == "max" else min)(scored, key=lambda f: f["final"][pm])
     by_status = defaultdict(int)
     for f in facts:
         by_status[f["status"]] += 1
     parts = [f"{len(runs)} runs analysed ({', '.join(f'{n} {k}' for k, n in sorted(by_status.items()))})."]
     if best:
-        cfg = ", ".join(f"{k}={v}" for k, v in best["config"].items())
-        parts.append(f"Best run is #{best['run_id']} with {exp.primary_metric}={best[key]:.4f} ({cfg}).")
+        # Only mention hyperparameters that actually vary across the analysed runs.
+        varying = [k for k in best["config"] if len({repr(f["config"].get(k)) for f in facts}) > 1]
+        cfg = ", ".join(f"{k}={best['config'][k]}" for k in varying) or "same config as the others"
+        peak = best.get(peak_key)
+        peak_txt = f", peak {peak:.4f}" if peak is not None and abs(peak - best["final"][pm]) > 1e-9 else ""
+        parts.append(f"Best run is #{best['run_id']} with final {pm}={best['final'][pm]:.4f}{peak_txt} ({cfg}).")
     if anomalies:
         hi = sum(a["severity"] == "high" for a in anomalies)
         parts.append(f"{len(anomalies)} anomalies flagged ({hi} high severity).")

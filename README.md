@@ -9,6 +9,17 @@ comparisons. **Prometheus/Grafana** alerts fire on failed or stalled jobs. An **
 
 **Stack:** Python · FastAPI · SQLAlchemy · PostgreSQL · Redis · Kubernetes · React · Redux Toolkit · Recharts · Prometheus · Grafana · Docker · GitHub Actions · Claude API
 
+## Screenshots
+
+| | |
+|---|---|
+| ![Overview](docs/screenshots/1-overview.jpg) | ![Live run](docs/screenshots/2-live-run.jpg) |
+| **Overview** — slot usage, queue depth, success rate, runs by status | **Live run** — metrics stream in while the job trains |
+| ![Experiment](docs/screenshots/3-experiment-analyst.jpg) | ![Compare](docs/screenshots/4-compare-charts.jpg) |
+| **Experiment** — sweep results, best run, analyst summary | **Compare** — curves from several runs overlaid |
+| ![Compare table](docs/screenshots/5-compare-table.jpg) | ![Stalled run](docs/screenshots/6-stalled-run.jpg) |
+| **Compare table** — differing hyperparameters highlighted, winners in green | **Stalled run** — heartbeats stopped, watchdog killed the job |
+
 ```
                 ┌─────────────── React / Redux dashboard ───────────────┐
                 │  overview · experiments · live run view · compare     │
